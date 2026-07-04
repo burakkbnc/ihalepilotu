@@ -589,8 +589,8 @@ function sanitizeOzelGereklilikler(raw: unknown): LlmOzelGereklilik[] {
       ilgiliKalemler: sanitizeStringArray(obj.ilgili_kalemler, 5),
       kaynak: sanitizeFactualField(obj.kaynak),
       kullaniciAksiyonu: sanitizeFactualField(obj.kullanici_aksiyonu),
-      kaynakMadde: sanitizeDedupKey(obj.kaynak_madde),
-      konuEtiketi: sanitizeDedupKey(obj.konu_etiketi)
+      ...dedupKeyField('kaynakMadde', obj.kaynak_madde),
+      ...dedupKeyField('konuEtiketi', obj.konu_etiketi)
     });
   }
   return result;
@@ -654,6 +654,26 @@ function sanitizeDedupKey(raw: unknown, maxLen = 40): string | undefined {
   const trimmed = raw.trim();
   if (!trimmed || trimmed === NOT_DETECTED) return undefined;
   return trimmed.slice(0, maxLen);
+}
+
+/**
+ * KRİTİK PROD BUG DÜZELTMESİ: `sanitizeDedupKey` değer yoksa `undefined`
+ * döner — bu TypeScript'te (opsiyonel alan) sorunsuzdur, AMA nesneye
+ * `{ kaynakMadde: undefined }` şeklinde AÇIK bir anahtar olarak
+ * eklendiğinde, Firestore Admin SDK bunu KABUL ETMEZ: "Cannot use
+ * 'undefined' as a Firestore value" hatasıyla TÜM YAZMA İŞLEMİNİ
+ * reddeder (canlıda gözlemlendi: "data.riskler.9.kaynakMadde"). Firestore
+ * ayarlarını global olarak `ignoreUndefinedProperties`'e çevirmek yerine
+ * (bu, ilişkisiz başka alanlardaki gerçek hataları da sessizce
+ * maskeleyebilir), sorunu KAYNAĞINDA çözüyoruz: bu yardımcı fonksiyon,
+ * değer varsa `{ kaynakMadde: '...' }`, yoksa TAMAMEN BOŞ bir obje
+ * döner — yani anahtar hiç yaratılmaz (undefined ATANMAZ, alan nesnede
+ * hiç YER ALMAZ). `...dedupKeyField('kaynakMadde', raw)` şeklinde
+ * yayılarak (spread) kullanılır.
+ */
+function dedupKeyField<K extends string>(key: K, raw: unknown, maxLen = 40): { [P in K]?: string } {
+  const value = sanitizeDedupKey(raw, maxLen);
+  return value === undefined ? ({} as { [P in K]?: string }) : ({ [key]: value } as { [P in K]?: string });
 }
 
 /**
@@ -1477,6 +1497,43 @@ function mergeChunkedResults(chunkResults: SingleAnalysisResult[], providerName:
  *     kullanıcıya "kaç sayfanın analiz edildiği" bilgisi eklenir
  *     (analizKapsami — bkz. types/tender.ts LlmAnalizKapsami).
  */
+/**
+ * KRİTİK PROD BUG DÜZELTMESİ (genel güvenlik ağı): Canlıda "Cannot use
+ * 'undefined' as a Firestore value" hatasıyla TÜM analiz yazımı başarısız
+ * oldu (`data.riskler.9.kaynakMadde`). Kök neden: bazı sanitize
+ * fonksiyonları (`sanitizeDedupKey`, `sanitizeRiskScore`,
+ * `sanitizeRiskLevelField`, `sanitizeExecutiveSummary`) değer yoksa
+ * `undefined` döner; bu değer bir nesneye `{ alan: undefined }` şeklinde
+ * AÇIK bir anahtar olarak eklenirse (anahtarı hiç YAZMAMAK yerine),
+ * Firestore Admin SDK BÜTÜN yazma işlemini reddeder.
+ *
+ * `kaynakMadde`/`konuEtiketi` için kaynakta (dedupKeyField ile) düzeltildi.
+ * AMA aynı desen (`riskSkoru`, `etki`, `olasilik`, `executiveSummary`
+ * gibi) dosyada BAŞKA yerlerde de zaten VARDI — Sprint 11A'dan ÖNCE de
+ * gizli/uykuda bir risk olarak duruyordu. Tek tek her alanı avlamak yerine
+ * (bir sonrakini kaçırma riski taşır), Firestore'a giden NİHAİ objeyi tek
+ * bir noktada, DERİN (nested objeler/diziler dahil) olarak `undefined`
+ * anahtarlardan TAMAMEN arındırıyoruz. `null` DOKUNULMAZ (Firestore
+ * `null`'ı kabul eder, semantik olarak "bilinçli boş" anlamına gelir);
+ * SADECE açık `undefined` anahtarlar silinir. Bu fonksiyon `runLlmAnalysis`
+ * fonksiyonunun HER dönüş noktasında (tek çağrı VE chunk'lı) son adım
+ * olarak uygulanır.
+ */
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedDeep(item)) as unknown as T;
+  }
+  if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (val === undefined) continue;
+      result[key] = stripUndefinedDeep(val);
+    }
+    return result as T;
+  }
+  return value;
+}
+
 export async function runLlmAnalysis(
   provider: LLMProvider,
   request: LLMAnalysisRequest
@@ -1519,7 +1576,7 @@ export async function runLlmAnalysis(
       };
       merged.analizKapsami = kapsam;
     }
-    return merged;
+    return stripUndefinedDeep(merged);
   }
 
   // --- Chunk'lama gerekiyor: dokümanı parçalara böl, her parça için ayrı çağrı yap ---
@@ -1660,5 +1717,5 @@ export async function runLlmAnalysis(
     tamamiOkundu: totalSentPages >= totalRealPages
   } satisfies LlmAnalizKapsami;
 
-  return merged;
+  return stripUndefinedDeep(merged);
 }
