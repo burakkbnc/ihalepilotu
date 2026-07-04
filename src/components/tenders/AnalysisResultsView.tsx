@@ -1454,7 +1454,9 @@ export default function AnalysisResultsView({
                 ? "Bu ihale için otomatik analiz şu anda tamamlanamadı. Lütfen analizi tekrar çalıştırın; sorun devam ederse destek ekibiyle iletişime geçin."
                 : "Analiz sonuçları hazır olduğunda bu alanlar doldurulacaktır."
             }
-          />
+                />
+  </SectionCard>
+)}
       {(showAi || showGenel) && llmStatus === "failed" && (
         <SectionCard title="Analiz Durumu">
           <div className="space-y-2 rounded-lg border border-danger-100 bg-danger-50 p-4 text-sm text-danger-700">
