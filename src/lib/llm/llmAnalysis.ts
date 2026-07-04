@@ -1107,17 +1107,27 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
 const FUZZY_MATCH_THRESHOLD = 0.5;
 
 /**
- * SPRINT NOTU (Aşama A — dedup mantığını daha güvenli alanlara bağlama):
+ * SPRINT NOTU (Aşama A — dedup mantığını daha güvenli alanlara bağlama;
+ * DÜZELTME — Sprint 11A canlı testinde agresif eşleşme regresyonu):
  * Bir kaydın (risk/gerekli belge/özel gereklilik) chunk'lar arası
  * eşleştirmede kullanılabilecek YAPISAL (LLM'in serbest başlık metninden
  * DAHA GÜVENİLİR) kimlik alanları. `kaynakMadde`/`konuEtiketi` teknik
  * altyapı alanlarıdır (bkz. types/tender.ts) — UI'da gösterilmez.
+ *
+ * `kategoriTipi`/`ilgiliKalemler` BİLEREK burada YOK — canlı testte "aynı
+ * kategori + ortak ilgili kalem" kuralı, GERÇEKTEN FARKLI iki yükümlülüğü
+ * (ör. "TS/8985-TS/13075 mutfak sertifikası şartı" ile "restoranda yemek
+ * yeme şartı" — ikisi de "Yemek Hizmeti" kategorisinde ve "Öğle Yemeği"
+ * kalemine bağlı olabilir) TEK karta indirgeyip birini SESSİZCE kaybetti.
+ * Bu kural KALDIRILDI. Artık SADECE iki GÜÇLÜ sinyal kabul edilir:
+ * `kaynakMadde` TAM eşleşmesi veya `konuEtiketi` TAM eşleşmesi. Sayı,
+ * belge, standart, sertifika, sözleşme, araç/personel/sigorta gibi
+ * FARKLI yükümlülük türleri aynı kategoriyi paylaşsa bile bu ikisi
+ * eşleşmediği sürece ASLA aynı kayıt sayılmaz.
  */
 interface DedupStructuredKeys {
   kaynakMadde?: string;
   konuEtiketi?: string;
-  kategoriTipi?: string;
-  ilgiliKalemler?: string[];
 }
 
 /** Yapısal dedup anahtarlarını normalize eder (boşluk/noktalama/case farklarını eler). Boş/"tespit_edilemedi" ise null döner. */
@@ -1131,11 +1141,15 @@ function normalizeDedupKey(raw: string | undefined | null): string | null {
 
 /**
  * mergeAndDedupeArrays'in BULANIK (fuzzy) sürümü. ÖNCE, verilirse,
- * `structuredKeyFn`'in döndürdüğü GÜVENLİ alanlara (kaynak madde no,
- * normalize konu etiketi, kategori tipi + ilgili kalemler kesişimi) göre
- * eşleştirme yapar — bu alanlar LLM'in serbest başlık metninden daha az
- * "kelime oyunu" riski taşır (ör. "Sağlık Hizmeti" vs "Sağlık Hizmetleri"
- * farklı kelime kümesi üretir ama AYNI konu_etiketi'ni paylaşabilir).
+ * `structuredKeyFn`'in döndürdüğü GÜVENLİ alanlara (kaynak madde no TAM
+ * eşleşmesi veya normalize konu etiketi TAM eşleşmesi) göre eşleştirme
+ * yapar — bu alanlar LLM'in serbest başlık metninden daha az "kelime
+ * oyunu" riski taşır (ör. "Sağlık Hizmeti" vs "Sağlık Hizmetleri" farklı
+ * kelime kümesi üretir ama AYNI konu_etiketi'ni paylaşabilir). Sadece bu
+ * İKİ GÜÇLÜ sinyalden biri tam eşleşirse birleştirilir — kategori/konu
+ * BENZERLİĞİ tek başına ASLA yeterli değildir (bkz. yukarıdaki sprint
+ * notu — bu, canlı testte farklı yükümlülükleri yanlışlıkla birleştiren
+ * bir regresyonu düzeltmek için BİLİNÇLİ olarak dar tutuldu).
  * Bir kayıt için yapısal alan HİÇ verilmemişse (geriye dönük uyumluluk —
  * eski/uyumsuz LLM yanıtları), SADECE o zaman başlık kelime-kümesi
  * (Jaccard) benzerliğine düşülür. Konu-benzeri serbest metin başlıkları
@@ -1161,19 +1175,13 @@ function mergeAndDedupeArraysFuzzy<T>(
       const keys: DedupStructuredKeys = structuredKeyFn ? structuredKeyFn(item) : {};
       const normKaynak = normalizeDedupKey(keys.kaynakMadde);
       const normKonu = normalizeDedupKey(keys.konuEtiketi);
-      const normKategori = normalizeDedupKey(keys.kategoriTipi);
 
+      // SADECE iki güçlü sinyal: kaynakMadde TAM eşleşmesi VEYA
+      // konuEtiketi TAM eşleşmesi. Kategori/ilgili kalem benzerliği
+      // BİLEREK burada YOK (bkz. yukarıdaki sprint notu).
       const structuredExisting = merged.find((m) => {
         if (normKaynak && normalizeDedupKey(m.keys.kaynakMadde) === normKaynak) return true;
         if (normKonu && normalizeDedupKey(m.keys.konuEtiketi) === normKonu) return true;
-        if (
-          normKategori &&
-          normalizeDedupKey(m.keys.kategoriTipi) === normKategori &&
-          keys.ilgiliKalemler?.length &&
-          m.keys.ilgiliKalemler?.some((x) => keys.ilgiliKalemler!.includes(x))
-        ) {
-          return true;
-        }
         return false;
       });
 
@@ -1418,7 +1426,7 @@ function mergeChunkedResults(chunkResults: SingleAnalysisResult[], providerName:
       (o) => o.baslik,
       20,
       'özel gereklilikler',
-      (o) => ({ kaynakMadde: o.kaynakMadde, konuEtiketi: o.konuEtiketi, kategoriTipi: o.kategoriTipi, ilgiliKalemler: o.ilgiliKalemler })
+      (o) => ({ kaynakMadde: o.kaynakMadde, konuEtiketi: o.konuEtiketi })
     ),
     executiveSummary: {
       genelOzet: mergeScalarField('Genel Özet', chunkResults.map((r) => r.executiveSummary?.genelOzet ?? { value: NOT_DETECTED }), conflicts),
