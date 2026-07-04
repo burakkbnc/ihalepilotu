@@ -448,13 +448,7 @@ export default function AnalysisResultsView({
   );
   // Gerçek bir LLM sağlayıcısı yoksa (llmStatus === 'skipped_mock'), backend
   // artık 'llmAnalysis' section'ını YAZMAZ; bunun yerine ayrı ve açıkça
-  // etiketlenmiş bir 'ruleBasedPreview' section'ı yazar. Bu asla 'llmAnalysis'
-  // ile karıştırılmamalı/aynı UI kartlarıyla gösterilmemelidir — kullanıcı
-  // bunun regex/kural tabanlı bir ÖN TARAMA olduğunu, yapay zeka analizi
-  // olmadığını her zaman görebilmelidir.
-  const ruleBasedPreview = sections.find((s) => s.id === "ruleBasedPreview") as
-    | (TenderAnalysis & { data: TenderAnalysisLlmAnalysis["data"] })
-    | undefined;
+  
 
   const amIkn = readField<string | null>(administrativeMeta?.data, "ikn", null);
   const cdTenderDate = readField<string | null>(
@@ -1461,29 +1455,6 @@ export default function AnalysisResultsView({
                 : "Analiz sonuçları hazır olduğunda bu alanlar doldurulacaktır."
             }
           />
-          {llmStatus === "skipped_mock" && ruleBasedPreview?.data && (
-            <div className="mt-4 space-y-3 rounded-2xl border border-dashed border-warning-100 bg-warning-50 p-4">
-              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-warning-700">
-                <ShieldAlert size={14} strokeWidth={2} aria-hidden />
-                Doğrulanmamış Ön Bilgi
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Aşağıdaki bilgi henüz tam analiz tamamlanmadan önce görülen bir
-                ön izlemedir; doğruluğu garanti edilmez. Analizi tekrar
-                çalıştırdığınızda tam ve doğrulanmış sonuçlar burada görünecektir.
-              </p>
-              {ruleBasedPreview.data.executiveSummary?.genelOzet?.value &&
-                ruleBasedPreview.data.executiveSummary.genelOzet.value !==
-                  "tespit_edilemedi" && (
-                  <p className="text-sm text-slate-800">
-                    {ruleBasedPreview.data.executiveSummary.genelOzet.value}
-                  </p>
-                )}
-            </div>
-          )}
-        </SectionCard>
-      )}
-
       {(showAi || showGenel) && llmStatus === "failed" && (
         <SectionCard title="Analiz Durumu">
           <div className="space-y-2 rounded-lg border border-danger-100 bg-danger-50 p-4 text-sm text-danger-700">
