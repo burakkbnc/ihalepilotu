@@ -1,0 +1,119 @@
+rules_version = '2';
+
+// ============================================================
+// İhale Pilotu — Firebase Storage Security Rules (Faz 1 Temeli)
+//
+// Dosya yükleme akışı Faz 2'de aktif olacaktır. Bu kurallar,
+// beklenen yol yapısını (companies/{companyId}/tenders/{tenderId}/...)
+// önceden tanımlar ve varsayılan olarak HER ŞEYİ KAPALI tutar.
+//
+// Tasarım ilkeleri:
+// - companyId, kullanıcının Firestore users/{uid} belgesindeki
+//   companyId alanından okunur — yol parametresindeki companyId
+//   ile eşleşmelidir. Bu sayede bir kullanıcı başka bir şirketin
+//   storage path'ine erişemez.
+// - Dosya tipi (content type) ve boyut sınırı zorunludur.
+// - Yalnızca giriş yapmış kullanıcılar yazabilir.
+// ============================================================
+
+function isSignedIn() {
+  return request.auth != null;
+}
+
+// Kullanıcının Firestore'daki profil belgesinin var olup olmadığını kontrol eder
+function userProfileExists() {
+  return firestore.exists(/databases/(default)/documents/users/$(request.auth.uid));
+}
+
+// Firestore'daki kullanıcı profilinden companyId okur.
+// Profil mevcut değilse (örn. silinmiş/oluşturulmamış kullanıcı) null döner.
+function myCompanyId() {
+  return isSignedIn() && userProfileExists()
+    ? firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.companyId
+    : null;
+}
+
+function myRole() {
+  return isSignedIn() && userProfileExists()
+    ? firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role
+    : null;
+}
+
+function belongsToCompany(companyId) {
+  return isSignedIn() && myCompanyId() == companyId;
+}
+
+function isOwnerOrAdmin(companyId) {
+  return belongsToCompany(companyId) && (myRole() == 'owner' || myRole() == 'admin');
+}
+
+// İzin verilen doküman tipleri (Faz 2 — İdari/Teknik Şartname, Sözleşme, BFC, Ek Dokümanlar)
+function isAllowedDocumentType() {
+  return request.resource.contentType.matches('application/pdf')
+    || request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    || request.resource.contentType.matches('application/msword')
+    || request.resource.contentType.matches('text/plain')
+    || request.resource.contentType.matches('image/.*')
+    || request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    || request.resource.contentType.matches('application/vnd.ms-excel');
+}
+
+// Maksimum dosya boyutu: 25 MB
+function isUnderSizeLimit() {
+  return request.resource.size < 25 * 1024 * 1024;
+}
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ----------------------------------------------------------
+    // companies/{companyId}/tenders/{tenderId}/documents/{fileName}
+    // - Okuma: şirkete bağlı tüm üyeler (owner/admin/member)
+    // - Yazma (yükleme): yalnızca owner/admin, tip ve boyut kontrolü ile
+    // - Silme: yalnızca owner/admin
+    // ----------------------------------------------------------
+    match /companies/{companyId}/tenders/{tenderId}/documents/{fileName} {
+      allow read: if belongsToCompany(companyId);
+
+      allow create: if isOwnerOrAdmin(companyId)
+        && isAllowedDocumentType()
+        && isUnderSizeLimit();
+
+      allow update: if false; // Dosyalar değiştirilemez; yeniden yüklenmelidir
+      allow delete: if isOwnerOrAdmin(companyId);
+    }
+
+
+    // ----------------------------------------------------------
+    // companies/{companyId}/company-documents/{fileName}
+    // Şirket Hafızası belgeleri — owner/admin yükler, şirket üyeleri okur.
+    // ----------------------------------------------------------
+    match /companies/{companyId}/company-documents/{fileName} {
+      allow read: if belongsToCompany(companyId);
+
+      allow create: if isOwnerOrAdmin(companyId)
+        && isAllowedDocumentType()
+        && isUnderSizeLimit();
+
+      allow update: if false;
+      allow delete: if isOwnerOrAdmin(companyId);
+    }
+
+    // ----------------------------------------------------------
+    // companies/{companyId}/tenders/{tenderId}/ocr/{fileName}
+    // OCR çıktıları (Faz 3) — sistem tarafından (Admin SDK) yazılır,
+    // client yazma yapamaz; sadece okuma.
+    // ----------------------------------------------------------
+    match /companies/{companyId}/tenders/{tenderId}/ocr/{fileName} {
+      allow read: if belongsToCompany(companyId);
+      allow write: if false;
+    }
+
+    // ----------------------------------------------------------
+    // Varsayılan: Tanımlanmamış tüm yollar KAPALI.
+    // ----------------------------------------------------------
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

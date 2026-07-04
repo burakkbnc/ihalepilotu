@@ -1,0 +1,173 @@
+rules_version = '2';
+
+// ============================================================
+// İhale Pilotu — Firestore Security Rules (Faz 1)
+//
+// Tasarım ilkeleri:
+// - companyId her zaman kullanıcının kendi users/{uid} belgesinden
+//   okunur (custom claims YEDEK olarak da kontrol edilir). Client'tan
+//   gönderilen hiçbir companyId değeri doğrudan güvenilmez.
+// - Bir kullanıcı yalnızca kendi şirketinin verilerini okuyabilir/
+//   yazabilir.
+// - Rol bazlı yazma izinleri (owner > admin > member) burada uygulanır;
+//   ayrıca API tarafında da (Admin SDK ile) doğrulanır (defense-in-depth).
+// ============================================================
+
+function isSignedIn() {
+  return request.auth != null;
+}
+
+// Kullanıcının kendi profil belgesi
+function userDoc(uid) {
+  return get(/databases/$(database)/documents/users/$(uid));
+}
+
+// Kullanıcı profilinin var olup olmadığını kontrol eder
+function userDocExists(uid) {
+  return exists(/databases/$(database)/documents/users/$(uid));
+}
+
+function myProfile() {
+  return userDoc(request.auth.uid).data;
+}
+
+function myCompanyId() {
+  return isSignedIn() && userDocExists(request.auth.uid)
+    ? myProfile().companyId
+    : null;
+}
+
+function myRole() {
+  return isSignedIn() && userDocExists(request.auth.uid)
+    ? myProfile().role
+    : null;
+}
+
+// Belirtilen şirkete ait mi?
+function belongsToCompany(companyId) {
+  return isSignedIn() && myCompanyId() == companyId;
+}
+
+function isOwnerOf(companyId) {
+  return belongsToCompany(companyId) && myRole() == 'owner';
+}
+
+function isOwnerOrAdminOf(companyId) {
+  return belongsToCompany(companyId) && (myRole() == 'owner' || myRole() == 'admin');
+}
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --------------------------------------------------------
+    // users/{uid}
+    // - Kullanıcı kendi profilini okuyabilir.
+    // - companyId / role alanları YALNIZCA sunucu (Admin SDK) tarafından
+    //   değiştirilebilir; client tarafından bu alanlara yazma YASAK.
+    // - displayName gibi kişisel alanlar kullanıcı tarafından güncellenebilir.
+    // --------------------------------------------------------
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+
+      // İlk profil oluşturma sunucu tarafında (Admin SDK) yapılır;
+      // client'tan create işlemine izin VERİLMEZ.
+      allow create: if false;
+
+      // Kullanıcı sadece kendi displayName'ini güncelleyebilir,
+      // companyId/role/status/email/uid/createdAt değişmemelidir.
+      allow update: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.companyId == resource.data.companyId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.createdAt == resource.data.createdAt;
+
+      allow delete: if false;
+    }
+
+    // --------------------------------------------------------
+    // companies/{companyId}
+    // - Şirkete bağlı herhangi bir üye şirket belgesini okuyabilir.
+    // - Yalnızca Owner şirket bilgilerini güncelleyebilir
+    //   (plan alanları sunucu tarafında yönetilmelidir, burada
+    //   ownerId ve plan değişmez tutulur).
+    // - Şirket oluşturma/silme client'tan YAPILMAZ (Admin SDK, /api/company/create).
+    // --------------------------------------------------------
+    match /companies/{companyId} {
+      allow read: if belongsToCompany(companyId);
+
+      allow create: if false;
+
+      allow update: if isOwnerOf(companyId)
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.id == resource.data.id;
+
+      allow delete: if false;
+
+      // ------------------------------------------------------
+      // companies/{companyId}/members/{uid}
+      // - Şirket üyeleri tüm üye listesini okuyabilir.
+      // - Üyelik kayıtları YALNIZCA sunucu (Admin SDK) tarafından
+      //   oluşturulur/güncellenir/silinir; client'tan doğrudan
+      //   yazma YASAK (rol yükseltme saldırılarını önler).
+      // ------------------------------------------------------
+      match /members/{memberUid} {
+        allow read: if belongsToCompany(companyId);
+        allow write: if false;
+      }
+
+      // ------------------------------------------------------
+      // companies/{companyId}/tenders/{tenderId}
+      // - Şirkete bağlı tüm üyeler (owner/admin/member) ihaleleri okuyabilir.
+      // - Yazma işlemleri (oluşturma/güncelleme) YALNIZCA sunucu (Admin SDK)
+      //   üzerinden /api/tenders route'ları ile yapılır; client'tan
+      //   doğrudan yazma YASAK. Bu sayede rol kontrolü (owner/admin)
+      //   ve plan limiti kontrolü tek bir yerde (API) garanti edilir.
+      // ------------------------------------------------------
+      match /tenders/{tenderId} {
+        allow read: if belongsToCompany(companyId);
+        allow write: if false;
+
+        // companies/{companyId}/tenders/{tenderId}/documents/{documentId}
+        // Doküman metadata kayıtları — Faz 3'te Storage ile birlikte
+        // genişletilecektir. Yazma yalnızca /api üzerinden (Admin SDK).
+        match /documents/{documentId} {
+          allow read: if belongsToCompany(companyId);
+          allow write: if false;
+        }
+
+        // companies/{companyId}/tenders/{tenderId}/analysis/{section}
+        // Analiz sonuçları — Faz 3'te parser/LLM tarafından doldurulacaktır.
+        // Yazma yalnızca /api üzerinden (Admin SDK).
+        match /analysis/{section} {
+          allow read: if belongsToCompany(companyId);
+          allow write: if false;
+        }
+
+        // companies/{companyId}/tenders/{tenderId}/analysisRuns/{runId}
+        // Analiz çalıştırma geçmişi (audit) — yalnızca sunucu tarafından yazılır.
+        match /analysisRuns/{runId} {
+          allow read: if belongsToCompany(companyId);
+          allow write: if false;
+        }
+
+        // companies/{companyId}/tenders/{tenderId}/items/{itemId}
+        // Birim fiyat cetveli satırları — manuel veya parser kaynaklı.
+        // Yazma yalnızca /api üzerinden (Admin SDK).
+        match /items/{itemId} {
+          allow read: if belongsToCompany(companyId);
+          allow write: if false;
+        }
+
+        // companies/{companyId}/tenders/{tenderId}/activities/{activityId}
+        // Aktivite / audit log — yalnızca sunucu tarafından yazılır.
+        match /activities/{activityId} {
+          allow read: if belongsToCompany(companyId);
+          allow write: if false;
+        }
+      }
+    }
+  }
+}
