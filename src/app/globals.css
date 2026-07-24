@@ -23,3 +23,16 @@ a:focus-visible {
   outline: 2px solid #5d83cd;
   outline-offset: 1px;
 }
+
+html {
+  scroll-behavior: smooth;
+}
+
+::selection {
+  background: #dee1f8;
+  color: #0f1e3d;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}

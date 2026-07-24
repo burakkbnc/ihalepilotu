@@ -1,0 +1,5 @@
+import { MarketingShell, PageHero } from './MarketingShell';
+
+export default function LegalPage({ title, intro, sections }: { title: string; intro: string; sections: Array<[string,string]> }) {
+  return <MarketingShell><PageHero eyebrow="Yasal" title={title} description={intro}/><section className="mx-auto max-w-[920px] px-5 py-16 lg:px-10"><article className="rounded-[30px] border border-stone-200 bg-white p-7 shadow-card sm:p-12"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-400">Son güncelleme: 15 Temmuz 2026</p><div className="mt-8 space-y-9">{sections.map(([h,p])=><section key={h}><h2 className="text-xl font-semibold text-stone-950">{h}</h2><p className="mt-3 whitespace-pre-line text-sm leading-8 text-stone-600">{p}</p></section>)}</div><div className="mt-10 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-xs leading-6 text-amber-900">Bu metin yayın öncesi hukuk danışmanı tarafından şirket unvanı, veri sorumlusu bilgileri, saklama süreleri ve kullanılan altyapıya göre gözden geçirilmelidir.</div></article></section></MarketingShell>
+}

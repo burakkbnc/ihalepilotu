@@ -1,0 +1,2 @@
+import type { MetadataRoute } from 'next';
+export default function sitemap(): MetadataRoute.Sitemap { const base=process.env.NEXT_PUBLIC_SITE_URL||'https://ihalepilotu.com'; return ['','/urun','/paketler','/hakkimizda','/iletisim','/kvkk','/gizlilik-politikasi','/kullanim-kosullari','/cerez-politikasi'].map((path)=>({url:`${base}${path}`,lastModified:new Date(),changeFrequency:path===''?'weekly':'monthly',priority:path===''?1:0.7})); }
