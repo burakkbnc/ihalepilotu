@@ -55,6 +55,10 @@ export default function NewTenderPage() {
 
       const body = await res.json();
       if (!res.ok) {
+        if (body?.error?.code === 'tender_limit_reached') {
+          router.push('/paketler?reason=free-limit');
+          return;
+        }
         throw new Error(body?.error?.message || 'İhale oluşturulamadı.');
       }
 

@@ -25,5 +25,10 @@ export async function getTenderOrThrow(
     throw new ApiError(404, 'tender_not_found', 'İhale bulunamadı.');
   }
 
-  return { ref, tender: snap.data() as Tender };
+  const tender = snap.data() as Tender & { deletedAt?: string | null };
+  if (tender.deletedAt) {
+    throw new ApiError(404, 'tender_not_found', 'İhale bulunamadı.');
+  }
+
+  return { ref, tender };
 }

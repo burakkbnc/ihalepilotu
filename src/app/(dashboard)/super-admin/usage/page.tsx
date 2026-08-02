@@ -1,5 +1,5 @@
 import { adminDb } from '@/lib/firebase/admin';
-import { requireSuperAdmin } from '@/lib/auth/adminGuard';
+import { requireAdminPermission } from '@/lib/auth/adminGuard';
 import { BarChart3, BrainCircuit, Building2, Coins, Database, FileText, Sparkles } from 'lucide-react';
 
 function usd(n: number) {
@@ -17,13 +17,13 @@ function formatDate(value?: string) {
 }
 
 export default async function Page() {
-  await requireSuperAdmin();
+  await requireAdminPermission('usage');
   const [companiesSnap, users, tenders, runsCount, runsSnap] = await Promise.all([
     adminDb.collection('companies').limit(500).get().catch(() => null),
     adminDb.collection('users').count().get().catch(() => null),
     adminDb.collectionGroup('tenders').count().get().catch(() => null),
-    adminDb.collectionGroup('analysisRuns').count().get().catch(() => null),
-    adminDb.collectionGroup('analysisRuns').orderBy('createdAt', 'desc').limit(1000).get().catch(() => null)
+    adminDb.collection('usageEvents').count().get().catch(() => null),
+    adminDb.collection('usageEvents').orderBy('createdAt', 'desc').limit(1000).get().catch(() => null)
   ]);
 
   const companyMap = new Map<string, any>();
@@ -31,9 +31,7 @@ export default async function Page() {
 
   const runs = (runsSnap?.docs || []).map((doc) => {
     const data = doc.data() as any;
-    const tenderRef = doc.ref.parent.parent;
-    const companyRef = tenderRef?.parent.parent;
-    const companyId = data.companyId || companyRef?.id || '';
+    const companyId = data.companyId || '';
     return { id: doc.id, companyId, ...(data as any) };
   });
 

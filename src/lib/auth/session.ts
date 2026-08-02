@@ -31,7 +31,7 @@ export async function getSessionContext(): Promise<SessionContext | null> {
   }
 
   try {
-    const decoded = await adminAuth.verifySessionCookie(sessionCookie, true);
+    const decoded = await adminAuth.verifySessionCookie(sessionCookie, false);
 
     const claims = decoded as typeof decoded & Partial<AuthClaims>;
     const email = decoded.email ?? '';
@@ -118,6 +118,13 @@ export async function getCurrentUserProfile(): Promise<{
 
   if (profile.status === 'disabled') {
     return null;
+  }
+
+  // Şirket pasifliği yalnız API'lerde değil tüm dashboard oturumunda uygulanır.
+  // Askıdaki şirketler giriş yapabilir; yalnız yeni analiz başlatamaz.
+  if (profile.companyId && profile.role !== 'super_admin') {
+    const companySnap = await adminDb.collection('companies').doc(profile.companyId).get();
+    if (!companySnap.exists || (companySnap.data() as any)?.status === 'disabled') return null;
   }
 
   return { session, profile };

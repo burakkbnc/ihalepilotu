@@ -23,11 +23,18 @@ function mapAuthError(code: string): string {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { signIn, signInWithGoogle } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const handleGoogle = async () => {
+    setError(null); setSubmitting(true);
+    try { await signInWithGoogle(); router.replace('/dashboard'); }
+    catch (err: any) { setError(mapAuthError(err?.code || '')); }
+    finally { setSubmitting(false); }
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -37,7 +44,6 @@ export default function LoginPage() {
     try {
       await signIn(email, password);
       router.replace('/dashboard');
-      router.refresh();
     } catch (err: any) {
       setError(mapAuthError(err?.code || ''));
     } finally {
@@ -54,6 +60,12 @@ export default function LoginPage() {
           Şartname analizi ve teklif hazırlık akışınıza devam edin.
         </p>
       </div>
+
+      <button type="button" onClick={handleGoogle} disabled={submitting} className="mb-5 inline-flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-60">
+        <span className="grid h-5 w-5 place-items-center rounded-full bg-white text-[13px] font-bold text-blue-600">G</span>
+        Google ile devam et
+      </button>
+      <div className="mb-5 flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200"/><span>veya e-posta ile</span><span className="h-px flex-1 bg-slate-200"/></div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
         <div>
@@ -76,9 +88,8 @@ export default function LoginPage() {
         </div>
 
         <div>
-          <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-700">
-            Şifre
-          </label>
+          <div className="mb-1.5 flex items-center justify-between"><label htmlFor="password" className="block text-sm font-medium text-slate-700">Şifre</label><Link href="/forgot-password" className="text-xs font-semibold text-brand-700 hover:underline">Şifremi unuttum</Link></div>
+          
           <div className="relative">
             <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} aria-hidden />
             <input

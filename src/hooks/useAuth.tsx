@@ -1,20 +1,14 @@
 'use client';
 
-// ============================================================
-// useAuth — Firebase Auth durumunu ve Firestore kullanıcı profilini
-// React context üzerinden tüm uygulamaya sağlar.
-// ============================================================
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode
-} from 'react';
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
+  GoogleAuthProvider,
   createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signInWithPopup,
   signOut as firebaseSignOut,
   type User
 } from 'firebase/auth';
@@ -27,13 +21,16 @@ interface AuthContextValue {
   profile: UserProfile | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  resendVerification: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-async function createSessionCookie(idToken: string, expectedUid?: string, expectedEmail?: string | null) {
+async function createSessionCookie(idToken: string) {
   const res = await fetch('/api/auth/session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -43,34 +40,19 @@ async function createSessionCookie(idToken: string, expectedUid?: string, expect
     const body = await res.json().catch(() => null);
     throw new Error(body?.error?.message || 'Oturum oluşturulamadı.');
   }
-
-  // Cookie'nin gerçekten yazıldığını ve sunucu tarafında geçerli
-  // olduğunu teyit et. Bu sayede /company/new veya /dashboard'a
-  // yönlendirme yapılmadan önce session cookie aktif garanti edilir.
-  await verifySessionActive(expectedUid, expectedEmail);
 }
 
-/**
- * /api/auth/session GET ile session cookie'sinin aktif olduğunu doğrular.
- * Cookie yazımı ile bir sonraki isteğin arasında oluşabilecek kısa süreli
- * gecikmelere karşı birkaç kez tekrar dener.
- */
-async function verifySessionActive(expectedUid?: string, expectedEmail?: string | null, retries = 5): Promise<void> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    const res = await fetch('/api/auth/session', { method: 'GET', cache: 'no-store' });
-    if (res.ok) {
-      const body = await res.json().catch(() => null);
-      const session = body?.data;
-      const uidMatches = !expectedUid || session?.uid === expectedUid;
-      const emailMatches = !expectedEmail || String(session?.email || '').toLowerCase() === expectedEmail.toLowerCase();
-      if (uidMatches && emailMatches) return;
-    }
-
-    if (attempt < retries - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
+async function ensureServerProfile(user: User, displayName?: string | null) {
+  const idToken = await user.getIdToken();
+  const res = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ displayName: displayName || user.displayName || user.email?.split('@')[0] || 'Kullanıcı' })
+  });
+  if (!res.ok && res.status !== 409) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error?.message || 'Kullanıcı profili oluşturulamadı.');
   }
-  throw new Error('Oturum doğrulanamadı. Lütfen tekrar giriş yapmayı deneyin.');
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -78,80 +60,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      if (!firebaseUser) {
-        setProfile(null);
-        setLoading(false);
-      }
-    });
-    return unsubscribeAuth;
-  }, []);
+  useEffect(() => onAuthStateChanged(auth, (firebaseUser) => {
+    setUser(firebaseUser);
+    if (!firebaseUser) { setProfile(null); setLoading(false); }
+  }), []);
 
   useEffect(() => {
     if (!user) return;
-
-    const unsubscribeProfile = onSnapshot(
-      doc(db, 'users', user.uid),
-      (snap) => {
-        setProfile(snap.exists() ? (snap.data() as UserProfile) : null);
-        setLoading(false);
-      },
-      () => setLoading(false)
-    );
-
-    return unsubscribeProfile;
+    return onSnapshot(doc(db, 'users', user.uid), (snap) => {
+      setProfile(snap.exists() ? (snap.data() as UserProfile) : null);
+      setLoading(false);
+    }, () => setLoading(false));
   }, [user]);
 
   const signIn = async (email: string, password: string) => {
-    // Önce eski HttpOnly session cookie temizlenir. Böylece başka hesapla
-    // giriş yapıldığında sidebar eski kullanıcıyı / super admin yetkisini taşımaz.
-    await fetch('/api/auth/session', { method: 'DELETE', cache: 'no-store' }).catch(() => null);
-
     const cred = await signInWithEmailAndPassword(auth, email, password);
-    const idToken = await cred.user.getIdToken(true);
-    await createSessionCookie(idToken, cred.user.uid, cred.user.email);
+    await createSessionCookie(await cred.user.getIdToken());
+  };
+
+  const signInWithGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const cred = await signInWithPopup(auth, provider);
+    await ensureServerProfile(cred.user, cred.user.displayName);
+    await createSessionCookie(await cred.user.getIdToken());
   };
 
   const signUp = async (email: string, password: string, displayName: string) => {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
-    const idToken = await cred.user.getIdToken();
-
-    // Firestore profilini sunucu üzerinden oluştur (Admin SDK ile)
-    const res = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`
-      },
-      body: JSON.stringify({ displayName })
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(body?.error?.message || 'Kayıt sırasında hata oluştu.');
-    }
-
-    await createSessionCookie(idToken, cred.user.uid, cred.user.email);
+    await ensureServerProfile(cred.user, displayName);
+    if (process.env.NEXT_PUBLIC_REQUIRE_EMAIL_VERIFICATION === 'true') await sendEmailVerification(cred.user);
+    await createSessionCookie(await cred.user.getIdToken());
   };
 
-  const signOut = async () => {
-    await fetch('/api/auth/session', { method: 'DELETE' });
-    await firebaseSignOut(auth);
-  };
+  const resetPassword = async (email: string) => sendPasswordResetEmail(auth, email);
+  const resendVerification = async () => { if (auth.currentUser) await sendEmailVerification(auth.currentUser); };
+  const signOut = async () => { await fetch('/api/auth/session', { method: 'DELETE' }); await firebaseSignOut(auth); };
 
-  return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ user, profile, loading, signIn, signInWithGoogle, signUp, resetPassword, resendVerification, signOut }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('useAuth, AuthProvider içinde kullanılmalıdır.');
-  }
+  if (!ctx) throw new Error('useAuth, AuthProvider içinde kullanılmalıdır.');
   return ctx;
 }

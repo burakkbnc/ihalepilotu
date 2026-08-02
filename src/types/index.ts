@@ -4,7 +4,7 @@
 // ============================================================
 
 /** Sistemdeki kullanıcı rolleri (şirket bazlı) */
-export type UserRole = 'super_admin' | 'owner' | 'admin' | 'member';
+export type UserRole = 'super_admin' | 'admin_team' | 'owner' | 'admin' | 'member';
 
 /**
  * users/{uid}
@@ -23,16 +23,23 @@ export interface UserProfile {
   updatedAt: string; // ISO timestamp
   /** Hesap durumu — Owner tarafından devre dışı bırakılabilir */
   status: 'active' | 'disabled';
+  /** Platform yöneticileri için görev rolü */
+  adminRole?: 'platform_admin' | 'operations_admin' | 'support_admin' | 'finance_admin' | 'content_admin' | null;
+  /** Son başarılı oturum zamanı */
+  lastLoginAt?: string | null;
 }
 
 /** Şirket paket / plan bilgisi (ileride paket yönetimi için) */
 export interface CompanyPlan {
-  /** Plan adı — Faz 1'de sabit 'trial' */
-  name: 'trial' | 'starter' | 'pro' | 'enterprise';
-  /** Aktif ihale limiti (null = sınırsız) */
+  name: 'trial' | 'starter' | 'pro' | 'enterprise' | string;
   tenderLimit: number | null;
-  /** Şirket başına kullanıcı limiti (null = sınırsız) */
   userLimit: number | null;
+  analysisCredits: number | null;
+  analysisCreditsRemaining: number | null;
+  assistantQuestionLimit: number | null;
+  trialStartedAt: string | null;
+  trialEndsAt: string | null;
+  billingStatus: 'trialing' | 'active' | 'past_due' | 'suspended' | 'cancelled';
 }
 
 /**
@@ -46,6 +53,7 @@ export interface Company {
   /** Şirketi oluşturan kullanıcının uid'si */
   ownerId: string;
   plan: CompanyPlan;
+  status: 'active' | 'suspended' | 'disabled';
   createdAt: string;
   updatedAt: string;
 }

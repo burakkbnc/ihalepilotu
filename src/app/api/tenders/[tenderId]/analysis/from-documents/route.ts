@@ -13,6 +13,7 @@ import { extractTextFromTenderDocuments } from "@/lib/documents/extractText";
 import { runAnalysisV2, mergeBoqV2, countSections } from "@/lib/analysis-v2";
 import { getLLMProvider } from "@/lib/llm";
 import { runLlmAnalysis } from "@/lib/llm/llmAnalysis";
+import { reserveAnalysisCredit, finalizeAnalysisCredit } from "@/lib/billing/credits";
 import type {
   AnalysisRun,
   TenderAnalysis,
@@ -65,6 +66,7 @@ const ANALYZABLE_TYPES: TenderDocument["documentType"][] = [
   "birim_fiyat_cetveli",
   "zeyilname",
   "ek_belge",
+  "sozlesme_tasarisi",
 ];
 
 export const POST = withApiErrorHandling(
@@ -155,7 +157,8 @@ export const POST = withApiErrorHandling(
         (doc) =>
           doc.documentType === "teknik_sartname" ||
           doc.documentType === "birim_fiyat_cetveli" ||
-          doc.documentType === "ek_belge",
+          doc.documentType === "ek_belge" ||
+          doc.documentType === "sozlesme_tasarisi",
       )
       .map((doc) => `# ${doc.fileName}\n${doc.text}`)
       .join("\n\n");
@@ -193,7 +196,8 @@ export const POST = withApiErrorHandling(
       (doc) =>
         doc.documentType === "teknik_sartname" ||
         doc.documentType === "birim_fiyat_cetveli" ||
-        doc.documentType === "ek_belge",
+        doc.documentType === "ek_belge" ||
+        doc.documentType === "sozlesme_tasarisi",
     );
     const zeyilnameImages = extraction.extractedImages
       .filter((doc) => doc.documentType === "zeyilname")
@@ -228,6 +232,7 @@ export const POST = withApiErrorHandling(
     }
 
     const runRef = ref.collection("analysisRuns").doc();
+    await reserveAnalysisCredit({ companyId, tenderId: tender.id, userId: session.uid, runId: runRef.id });
 
     try {
       const pipelineResult = await runParserPipeline({
@@ -595,6 +600,11 @@ export const POST = withApiErrorHandling(
           ref.collection("documents").orderBy("createdAt", "asc").get(),
         ]);
 
+      await finalizeAnalysisCredit({
+        companyId, tenderId: tender.id, runId: runRef.id, success: true,
+        usage: llmUsageInfo || undefined
+      });
+
       return apiSuccess(
         {
           run,
@@ -635,6 +645,7 @@ export const POST = withApiErrorHandling(
         createdAt: new Date().toISOString(),
       } satisfies AnalysisRun);
 
+      await finalizeAnalysisCredit({ companyId, tenderId: tender.id, runId: runRef.id, success: false });
       await ref.update({
         status: "documents_pending",
         updatedAt: new Date().toISOString(),

@@ -20,7 +20,7 @@ import {
 import { useAuth } from '@/hooks/useAuth';
 import type { CompanyMember, UserRole } from '@/types';
 
-type CompanyUserRole = Exclude<UserRole, 'super_admin'>;
+type CompanyUserRole = Exclude<UserRole, 'super_admin' | 'admin_team'>;
 
 const ROLE_LABELS: Record<CompanyUserRole, string> = {
   owner: 'Şirket Sahibi',

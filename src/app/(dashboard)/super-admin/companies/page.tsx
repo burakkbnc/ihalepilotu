@@ -1,10 +1,10 @@
 import { adminDb } from '@/lib/firebase/admin';
-import { requireSuperAdmin } from '@/lib/auth/adminGuard';
-import { updateCompanyPlan, updateCompanyStatus } from '../actions';
+import { requireAdminPermission } from '@/lib/auth/adminGuard';
+import { adjustCompanyCredits, updateCompanyPlan, updateCompanyStatus } from '../actions';
 import { BarChart3, Building2, CalendarDays, Coins, Crown, Gauge, PauseCircle, PlayCircle, Save, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import type { CompanyPlan } from '@/types';
 
-const FALLBACK_PLANS: CompanyPlan['name'][] = ['trial', 'starter', 'pro', 'enterprise'];
+const FALLBACK_PLANS: CompanyPlan['name'][] = ['free', 'trial', 'starter', 'pro', 'enterprise'];
 
 function formatDate(value?: string) {
   if (!value) return '—';
@@ -14,6 +14,7 @@ function formatDate(value?: string) {
 
 function planLabel(name: string) {
   const labels: Record<string, string> = {
+    free: 'Ücretsiz Kullanım',
     trial: 'Trial',
     starter: 'Starter',
     pro: 'Pro',
@@ -31,26 +32,51 @@ function usd(n: number) {
 }
 
 export default async function Page() {
-  await requireSuperAdmin();
-  const [companySnap, packageSnap, runsSnap] = await Promise.all([
+  await requireAdminPermission('companies');
+  const [companySnap, packageSnap, runsSnap, documentsSnap, usersSnap] = await Promise.all([
     adminDb.collection('companies').orderBy('createdAt', 'desc').limit(100).get().catch(() => null),
     adminDb.collection('packages').where('status', '==', 'active').get().catch(() => null),
-    adminDb.collectionGroup('analysisRuns').orderBy('createdAt', 'desc').limit(1000).get().catch(() => null)
+    adminDb.collectionGroup('analysisRuns').orderBy('createdAt', 'desc').limit(1000).get().catch(() => null),
+    adminDb.collectionGroup('documents').limit(3000).get().catch(() => null),
+    adminDb.collection('users').limit(1000).get().catch(() => null)
   ]);
 
   const rows = companySnap?.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) || [];
   const packageNames = packageSnap?.docs.map((d) => String((d.data() as any).name || d.id)).filter(Boolean) || [];
-  const planNames = Array.from(new Set([...(packageNames.length ? packageNames : FALLBACK_PLANS)]));
+  const planNames = Array.from(new Set([...FALLBACK_PLANS, ...packageNames]));
 
-  const usageByCompany = new Map<string, { totalTokens: number; cost: number; runs: number }>();
+  const usageByCompany = new Map<string, { totalTokens: number; cost: number; runs: number; monthRuns: number; lastAnalysis: string | null; documents: number; storageBytes: number; lastLogin: string | null }>();
+  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
   (runsSnap?.docs || []).forEach((doc) => {
     const data = doc.data() as any;
     const companyId = data.companyId || '';
     if (!companyId) return;
-    const current = usageByCompany.get(companyId) || { totalTokens: 0, cost: 0, runs: 0 };
+    const current = usageByCompany.get(companyId) || { totalTokens: 0, cost: 0, runs: 0, monthRuns: 0, lastAnalysis: null, documents: 0, storageBytes: 0, lastLogin: null };
     current.totalTokens += Number(data.totalTokens || 0);
     current.cost += Number(data.estimatedCostUsd || 0);
     current.runs += 1;
+    const createdAt = String(data.createdAt || '');
+    if (createdAt && Date.parse(createdAt) >= monthStart.getTime()) current.monthRuns += 1;
+    if (createdAt && (!current.lastAnalysis || Date.parse(createdAt) > Date.parse(current.lastAnalysis))) current.lastAnalysis = createdAt;
+    usageByCompany.set(companyId, current);
+  });
+
+
+  (documentsSnap?.docs || []).forEach((doc) => {
+    const data = doc.data() as any;
+    const companyId = data.companyId || doc.ref.parent.parent?.parent?.parent?.id || '';
+    if (!companyId) return;
+    const current = usageByCompany.get(companyId) || { totalTokens: 0, cost: 0, runs: 0, monthRuns: 0, lastAnalysis: null, documents: 0, storageBytes: 0, lastLogin: null };
+    current.documents += 1;
+    current.storageBytes += Number(data.fileSize || 0);
+    usageByCompany.set(companyId, current);
+  });
+  (usersSnap?.docs || []).forEach((doc) => {
+    const data = doc.data() as any;
+    const companyId = data.companyId || '';
+    if (!companyId || !data.lastLoginAt) return;
+    const current = usageByCompany.get(companyId) || { totalTokens: 0, cost: 0, runs: 0, monthRuns: 0, lastAnalysis: null, documents: 0, storageBytes: 0, lastLogin: null };
+    if (!current.lastLogin || Date.parse(data.lastLoginAt) > Date.parse(current.lastLogin)) current.lastLogin = data.lastLoginAt;
     usageByCompany.set(companyId, current);
   });
 
@@ -79,17 +105,18 @@ export default async function Page() {
 
     <section className="space-y-4">
       {rows.map((r: any) => {
-        const status = r.status || 'active';
+        const companyStatus = r.status || 'active';
         const plan = r.plan || { name: 'trial', tenderLimit: 5, userLimit: 3 };
-        const isDisabled = status === 'disabled';
-        const usage = usageByCompany.get(r.id) || { totalTokens: 0, cost: 0, runs: 0 };
+        const isDisabled = companyStatus === 'disabled';
+        const isSuspended = companyStatus === 'suspended';
+        const usage = usageByCompany.get(r.id) || { totalTokens: 0, cost: 0, runs: 0, monthRuns: 0, lastAnalysis: null, documents: 0, storageBytes: 0, lastLogin: null };
 
         return <article key={r.id} className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-[0_18px_60px_rgba(15,23,42,.06)] transition hover:-translate-y-0.5 hover:shadow-[0_26px_80px_rgba(15,23,42,.10)]">
           <div className="grid gap-5 2xl:grid-cols-[1.05fr_.95fr_1fr_auto] 2xl:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="text-xl font-semibold leading-tight text-slate-950">{r.name || r.id}</h2>
-                <span className={`rounded-full px-3 py-1 text-xs font-bold ${isDisabled ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>{isDisabled ? 'Pasif' : 'Aktif'}</span>
+                <span className={`rounded-full px-3 py-1 text-xs font-bold ${isDisabled ? 'bg-rose-50 text-rose-700' : isSuspended ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{isDisabled ? 'Pasif' : isSuspended ? 'Askıda' : 'Aktif'}</span>
               </div>
               <p className="mt-2 break-all text-xs text-slate-400">{r.id}</p>
               <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500">
@@ -108,19 +135,34 @@ export default async function Page() {
 
             <form action={updateCompanyPlan} className="rounded-3xl border border-slate-100 bg-slate-50/80 p-4">
               <input type="hidden" name="companyId" value={r.id} />
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-[1.1fr_.7fr_.7fr_auto]">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-[1.1fr_.65fr_.65fr_.9fr_auto]">
                 <label className="space-y-1"><span className="text-[11px] font-bold uppercase tracking-[.12em] text-slate-400">Plan</span><select name="planName" defaultValue={plan.name || 'trial'} className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-300">{planNames.map((name) => <option key={name} value={name}>{planLabel(name)}</option>)}</select></label>
                 <label className="space-y-1"><span className="text-[11px] font-bold uppercase tracking-[.12em] text-slate-400">İhale limiti</span><input name="tenderLimit" defaultValue={plan.tenderLimit ?? ''} placeholder="∞" className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-300" /></label>
-                <label className="space-y-1"><span className="text-[11px] font-bold uppercase tracking-[.12em] text-slate-400">User limiti</span><input name="userLimit" defaultValue={plan.userLimit ?? ''} placeholder="∞" className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-300" /></label>
+                <label className="space-y-1"><span className="text-[11px] font-bold uppercase tracking-[.12em] text-slate-400">User limiti</span><input name="userLimit" defaultValue={plan.userLimit ?? ''} placeholder="∞" className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-300" /></label><label className="space-y-1"><span className="text-[11px] font-bold uppercase tracking-[.12em] text-slate-400">Trial bitiş</span><input type="date" name="trialEndsAt" defaultValue={plan.trialEndsAt ? String(plan.trialEndsAt).slice(0,10) : ''} className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-300" /></label>
                 <button className="mt-5 inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-semibold text-white hover:bg-slate-800"><Save size={15}/> Kaydet</button>
               </div>
             </form>
 
-            <form action={updateCompanyStatus} className="2xl:justify-self-end">
-              <input type="hidden" name="companyId" value={r.id} />
-              <input type="hidden" name="status" value={isDisabled ? 'active' : 'disabled'} />
-              <button className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold 2xl:w-auto ${isDisabled ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-50 text-rose-700 hover:bg-rose-100'}`}>{isDisabled ? <PlayCircle size={16}/> : <PauseCircle size={16}/>} {isDisabled ? 'Aktife al' : 'Pasife çek'}</button>
+            <form action={adjustCompanyCredits} className="rounded-3xl border border-blue-100 bg-blue-50/60 p-4">
+              <input type="hidden" name="companyId" value={r.id}/><input type="hidden" name="mode" value="set"/>
+              <div className="flex items-end gap-3"><label className="flex-1 space-y-1"><span className="text-[11px] font-bold uppercase tracking-[.12em] text-blue-600">Analiz kredisi</span><input name="amount" type="number" min="0" defaultValue={plan.analysisCreditsRemaining ?? plan.analysisCredits ?? 0} className="h-12 w-full rounded-2xl border border-blue-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-400"/></label><button className="h-12 rounded-2xl bg-blue-700 px-5 text-sm font-semibold text-white">Krediyi güncelle</button></div>
             </form>
+
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4 2xl:col-span-4">
+              <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] font-bold uppercase text-slate-400">Toplam analiz</p><p className="mt-1 font-semibold">{usage.runs}</p></div>
+              <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] font-bold uppercase text-slate-400">Bu ay analiz</p><p className="mt-1 font-semibold">{usage.monthRuns}</p></div>
+              <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] font-bold uppercase text-slate-400">Toplam belge</p><p className="mt-1 font-semibold">{usage.documents}</p></div>
+              <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] font-bold uppercase text-slate-400">Storage</p><p className="mt-1 font-semibold">{usage.storageBytes ? `${(usage.storageBytes/1024/1024).toFixed(1)} MB` : '0 MB'}</p></div>
+              <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] font-bold uppercase text-slate-400">Toplam AI maliyeti</p><p className="mt-1 font-semibold">{usd(usage.cost)}</p></div>
+              <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] font-bold uppercase text-slate-400">Son analiz</p><p className="mt-1 text-sm font-semibold">{formatDate(usage.lastAnalysis || undefined)}</p></div>
+              <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] font-bold uppercase text-slate-400">Son giriş</p><p className="mt-1 text-sm font-semibold">{formatDate(usage.lastLogin || undefined)}</p></div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 2xl:justify-self-end">
+              {companyStatus !== 'active' && <form action={updateCompanyStatus}><input type="hidden" name="companyId" value={r.id}/><input type="hidden" name="status" value="active"/><button className="inline-flex items-center gap-2 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700"><PlayCircle size={16}/>Aktife al</button></form>}
+              {!isSuspended && !isDisabled && <form action={updateCompanyStatus}><input type="hidden" name="companyId" value={r.id}/><input type="hidden" name="status" value="suspended"/><button className="inline-flex items-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700"><PauseCircle size={16}/>Askıya al</button></form>}
+              {!isDisabled && <form action={updateCompanyStatus}><input type="hidden" name="companyId" value={r.id}/><input type="hidden" name="status" value="disabled"/><button className="inline-flex items-center gap-2 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700"><PauseCircle size={16}/>Pasife çek</button></form>}
+            </div>
           </div>
         </article>;
       })}

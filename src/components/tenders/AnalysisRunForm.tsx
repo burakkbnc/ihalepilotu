@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { AlertTriangle, FileSearch, ShieldAlert } from 'lucide-react';
 import type { AnalysisRun, TenderAnalysis, TenderDocument, TenderItem } from '@/types/tender';
 
@@ -15,6 +16,7 @@ export default function AnalysisRunForm({
   documents: TenderDocument[];
   onCompleted: (run: AnalysisRun, sections: TenderAnalysis[], items: TenderItem[], documents?: TenderDocument[]) => void;
 }) {
+  const router = useRouter();
   const [administrativeText, setAdministrativeText] = useState('');
   const [technicalText, setTechnicalText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -48,7 +50,13 @@ export default function AnalysisRunForm({
       });
 
       const body = await res.json();
-      if (!res.ok) throw new Error(body?.error?.message || 'Dosya analizi başlatılamadı.');
+      if (!res.ok) {
+        if (body?.error?.code === 'insufficient_credits') {
+          router.push('/paketler?reason=free-limit');
+          return;
+        }
+        throw new Error(body?.error?.message || 'Dosya analizi başlatılamadı.');
+      }
 
       const run = body.data.run as AnalysisRun;
       setResult({
@@ -96,7 +104,13 @@ export default function AnalysisRunForm({
       });
 
       const body = await res.json();
-      if (!res.ok) throw new Error(body?.error?.message || 'Analiz başlatılamadı.');
+      if (!res.ok) {
+        if (body?.error?.code === 'insufficient_credits') {
+          router.push('/paketler?reason=free-limit');
+          return;
+        }
+        throw new Error(body?.error?.message || 'Analiz başlatılamadı.');
+      }
 
       const run = body.data.run as AnalysisRun;
 

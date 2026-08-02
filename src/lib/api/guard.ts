@@ -4,7 +4,8 @@
 // ============================================================
 import { NextResponse } from 'next/server';
 import { getCurrentUserProfile } from '@/lib/auth/session';
-import type { ApiResponse, UserProfile, UserRole } from '@/types';
+import type { ApiResponse, UserProfile, UserRole, Company } from '@/types';
+import { adminDb } from '@/lib/firebase/admin';
 import type { SessionContext } from '@/lib/auth/session';
 
 export class ApiError extends Error {
@@ -54,6 +55,19 @@ export async function requireCompany(): Promise<{
 
   if (!profile.companyId || !profile.role) {
     throw new ApiError(403, 'no_company', 'Kullanıcı herhangi bir şirkete bağlı değil.');
+  }
+
+  const companySnap = await adminDb.collection('companies').doc(profile.companyId).get();
+  if (!companySnap.exists) throw new ApiError(404, 'company_not_found', 'Şirket kaydı bulunamadı.');
+  const company = companySnap.data() as Company;
+  if (company.status === 'disabled') {
+    throw new ApiError(403, 'company_inactive', 'Şirket hesabı kullanıma kapalıdır.');
+  }
+  if (company.plan?.billingStatus === 'suspended' || company.plan?.billingStatus === 'cancelled') {
+    throw new ApiError(402, 'subscription_inactive', 'Paketiniz aktif değil.');
+  }
+  if (company.plan?.name === 'trial' && company.plan?.trialEndsAt && Date.parse(company.plan.trialEndsAt) < Date.now()) {
+    throw new ApiError(402, 'trial_expired', 'Deneme süreniz sona erdi.');
   }
 
   return { session, profile, companyId: profile.companyId };

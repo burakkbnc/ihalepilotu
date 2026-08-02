@@ -38,6 +38,7 @@ import { runParserPipeline } from '@/lib/parser/pipeline';
 import { runAnalysisV2, mergeBoqV2 } from '@/lib/analysis-v2';
 import { getLLMProvider } from '@/lib/llm';
 import { runLlmAnalysis } from '@/lib/llm/llmAnalysis';
+import { reserveAnalysisCredit, finalizeAnalysisCredit } from '@/lib/billing/credits';
 import type { AnalysisRun, RunAnalysisInput, TenderAnalysis, TenderItem } from '@/types/tender';
 
 interface RouteParams {
@@ -69,6 +70,7 @@ export const POST = withApiErrorHandling(async (req: NextRequest, { params }: Ro
 
   const now = new Date().toISOString();
   const runRef = ref.collection('analysisRuns').doc();
+  await reserveAnalysisCredit({ companyId, tenderId: tender.id, userId: session.uid, runId: runRef.id });
 
   let pipelineResult;
   try {
@@ -104,6 +106,7 @@ export const POST = withApiErrorHandling(async (req: NextRequest, { params }: Ro
     };
 
     await runRef.set(failedRun);
+    await finalizeAnalysisCredit({ companyId, tenderId: tender.id, runId: runRef.id, success: false });
 
     await logActivity({
       companyId,
@@ -465,5 +468,9 @@ export const POST = withApiErrorHandling(async (req: NextRequest, { params }: Ro
   const updatedItemsSnap = await ref.collection('items').orderBy('orderNo', 'asc').get();
   const items = updatedItemsSnap.docs.map((d) => d.data() as TenderItem);
 
+  await finalizeAnalysisCredit({
+    companyId, tenderId: tender.id, runId: runRef.id, success: true,
+    usage: { provider: (run as any).provider, model: (run as any).model, inputTokens: (run as any).inputTokens, outputTokens: (run as any).outputTokens, estimatedCostUsd: (run as any).estimatedCostUsd }
+  });
   return apiSuccess({ run, sections, items }, 201);
 });

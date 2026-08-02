@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { adminDb } from '@/lib/firebase/admin';
-import { requireSuperAdmin } from '@/lib/auth/adminGuard';
+import { requireAdminPermission } from '@/lib/auth/adminGuard';
 import { BarChart3, Building2, LifeBuoy, Package, ShieldCheck, Users, Activity, ArrowRight } from 'lucide-react';
 
 async function safeCount(path: 'companies' | 'users' | 'packages' | 'supportTickets') {
@@ -20,7 +20,7 @@ async function getCounts() {
 }
 
 export default async function Page() {
-  await requireSuperAdmin();
+  await requireAdminPermission('dashboard');
   const counts = await getCounts();
   const cards = [
     { label: 'Şirketler', value: counts.companies, href: '/super-admin/companies', icon: Building2, desc: 'Firma listeleme, paket değiştirme, pasife alma' },

@@ -1,9 +1,10 @@
 import { adminDb } from '@/lib/firebase/admin';
-import { requireSuperAdmin } from '@/lib/auth/adminGuard';
-import { createPackage, updatePackageStatus } from '../actions';
-import { Package, PauseCircle, PlayCircle, Plus } from 'lucide-react';
+import { requireAdminPermission } from '@/lib/auth/adminGuard';
+import { createPackage, deletePackage, updatePackageStatus } from '../actions';
+import { Package, PauseCircle, PlayCircle, Plus, Trash2 } from 'lucide-react';
 
 const DEFAULT_PACKAGES = [
+  { id:'free', name:'free', label:'Ücretsiz Kullanım', tenderLimit:1, userLimit:1, monthlyPrice:0, status:'active' },
   { id:'trial', name:'trial', label:'Trial', tenderLimit:5, userLimit:3, monthlyPrice:0, status:'active' },
   { id:'starter', name:'starter', label:'Starter', tenderLimit:25, userLimit:10, monthlyPrice:0, status:'active' },
   { id:'pro', name:'pro', label:'Pro', tenderLimit:100, userLimit:30, monthlyPrice:0, status:'active' },
@@ -11,10 +12,11 @@ const DEFAULT_PACKAGES = [
 ];
 
 export default async function Page() {
-  await requireSuperAdmin();
+  await requireAdminPermission('packages');
   const snap = await adminDb.collection('packages').orderBy('createdAt','desc').get().catch(() => null);
   const firestoreRows = snap?.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) || [];
-  const rows = firestoreRows.length ? firestoreRows : DEFAULT_PACKAGES;
+  const stored = new Map(firestoreRows.map((p:any) => [String(p.id || p.name), p]));
+  const rows = [...DEFAULT_PACKAGES.map((p) => ({ ...p, ...(stored.get(p.id) || {}) })), ...firestoreRows.filter((p:any) => !DEFAULT_PACKAGES.some((d) => d.id === String(p.id || p.name)))];
 
   return <div className="mx-auto w-full max-w-[1500px] space-y-6">
     <section className="rounded-[34px] border border-slate-200 bg-white p-8 shadow-[0_20px_70px_rgba(15,23,42,.08)]">
@@ -38,7 +40,7 @@ export default async function Page() {
     <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{rows.map((p:any)=>{ const status = p.status || 'active'; return <div key={p.id || p.name} className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-blue-700">{p.name}</p><h3 className="mt-2 text-2xl font-semibold text-slate-950">{p.label || p.name}</h3></div><span className={`rounded-full px-3 py-1 text-xs font-bold ${status === 'disabled' ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>{status === 'disabled' ? 'Pasif' : 'Aktif'}</span></div>
       <div className="mt-5 space-y-2 text-sm text-slate-600"><p>İhale limiti: <b>{p.tenderLimit ?? 'Sınırsız'}</b></p><p>Kullanıcı limiti: <b>{p.userLimit ?? 'Sınırsız'}</b></p><p>Aylık ücret: <b>{p.monthlyPrice ? `${p.monthlyPrice} TL` : 'Tanımsız'}</b></p></div>
-      <form action={updatePackageStatus} className="mt-5"><input type="hidden" name="id" value={p.id || p.name}/><input type="hidden" name="status" value={status === 'disabled' ? 'active' : 'disabled'}/><button className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${status === 'disabled' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{status === 'disabled' ? <PlayCircle size={14}/> : <PauseCircle size={14}/>} {status === 'disabled' ? 'Aktife al' : 'Pasife çek'}</button></form>
+      <div className="mt-5 flex flex-wrap gap-2"><form action={updatePackageStatus}><input type="hidden" name="id" value={p.id || p.name}/><input type="hidden" name="status" value={status === 'disabled' ? 'active' : 'disabled'}/><button className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${status === 'disabled' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{status === 'disabled' ? <PlayCircle size={14}/> : <PauseCircle size={14}/>} {status === 'disabled' ? 'Aktife al' : 'Pasife çek'}</button></form>{!['free','trial','starter','pro','enterprise'].includes(String(p.id || p.name)) && <form action={deletePackage}><input type="hidden" name="id" value={p.id || p.name}/><button className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700"><Trash2 size={14}/> Paketi sil</button></form>}</div>
     </div>})}</section>
   </div>;
 }

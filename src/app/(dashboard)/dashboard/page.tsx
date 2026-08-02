@@ -205,7 +205,7 @@ export default async function DashboardPage() {
                 <div className="mt-5 space-y-3">
                   <DateRow label="Son teklif" value={formatDate(featuredTender.submissionDeadline)} />
                   <DateRow label="Analiz hazır" value={`${analyzedCount}/${Math.max(tenders.length, 1)}`} />
-                  <DateRow label="Plan" value={company?.plan?.name ?? 'trial'} />
+                  <DateRow label="Plan" value={company?.plan?.name === 'free' ? 'Ücretsiz Kullanım' : (company?.plan?.name ?? 'Trial')} />
                 </div>
               </div>
             </div>

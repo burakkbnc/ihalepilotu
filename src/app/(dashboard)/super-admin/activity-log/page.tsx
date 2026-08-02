@@ -1,0 +1,8 @@
+import { adminDb } from '@/lib/firebase/admin';
+import { requireAdminPermission } from '@/lib/auth/adminGuard';
+import { Activity } from 'lucide-react';
+export default async function Page(){
+ await requireAdminPermission('activity');
+ const snap=await adminDb.collection('adminActivityLogs').orderBy('createdAt','desc').limit(250).get().catch(()=>null); const rows=snap?.docs.map(d=>({id:d.id,...d.data() as any}))||[];
+ return <div className="mx-auto w-full max-w-[1500px] space-y-6"><section className="rounded-[34px] border border-slate-200 bg-white p-8 shadow-sm"><div className="inline-flex items-center gap-2 rounded-full bg-violet-50 px-4 py-2 text-xs font-bold uppercase tracking-[.18em] text-violet-700"><Activity size={14}/>Denetim</div><h1 className="mt-5 text-4xl font-semibold">Activity Log</h1><p className="mt-3 text-slate-600">Yönetici işlemlerini tarih, hedef ve işlem türüyle takip edin.</p></section><section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500"><tr><th className="px-6 py-4">Tarih</th><th>Yönetici UID</th><th>İşlem</th><th>Hedef</th><th>Hedef ID</th></tr></thead><tbody>{rows.map((r:any)=><tr key={r.id} className="border-t"><td className="px-6 py-4">{r.createdAt?new Date(r.createdAt).toLocaleString('tr-TR'):'—'}</td><td>{r.uid||'—'}</td><td className="font-semibold">{r.action||'—'}</td><td>{r.targetType||'—'}</td><td>{r.targetId||'—'}</td></tr>)}</tbody></table>{!rows.length&&<p className="p-8 text-slate-500">Henüz yönetici aktivitesi yok.</p>}</section></div>
+}

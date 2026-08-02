@@ -34,6 +34,9 @@ export type LLMProviderName = 'mock' | 'anthropic' | 'openai' | 'gemini';
  */
 export function getLLMProvider(): LLMProvider {
   const configured = (process.env.LLM_PROVIDER as LLMProviderName | undefined) ?? 'mock';
+  if (process.env.NODE_ENV === 'production' && configured === 'mock' && process.env.ALLOW_MOCK_LLM_IN_PRODUCTION !== 'true') {
+    throw new Error('Production ortamında Mock LLM kapalıdır. LLM_PROVIDER=anthropic ve ANTHROPIC_API_KEY tanımlayın.');
+  }
   return resolveProvider(configured);
 }
 

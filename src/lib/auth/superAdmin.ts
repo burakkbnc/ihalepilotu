@@ -13,5 +13,5 @@ export function isSuperAdminEmail(email?: string | null): boolean {
 
 export function isSuperAdminProfile(profile?: { email?: string | null; role?: string | null } | null): boolean {
   if (!profile) return false;
-  return profile.role === 'super_admin' || isSuperAdminEmail(profile.email);
+  return profile.role === 'super_admin' || profile.role === 'admin_team' || isSuperAdminEmail(profile.email);
 }

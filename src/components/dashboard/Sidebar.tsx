@@ -3,10 +3,11 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutGrid, FileText, Users, LogOut, Radar, UploadCloud, ShieldCheck, BarChart3, CalendarDays, Settings, LibraryBig, Building2, Package, LifeBuoy } from 'lucide-react';
+import { LayoutGrid, FileText, Users, LogOut, Radar, UploadCloud, ShieldCheck, BarChart3, CalendarDays, Settings, LibraryBig, Building2, Package, LifeBuoy, FolderArchive, UserCog, CreditCard, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import type { UserRole } from '@/types';
+import { hasAdminPermission, type AdminPermission } from '@/lib/auth/adminPermissions';
 
 interface NavItem {
   href: string;
@@ -15,16 +16,23 @@ interface NavItem {
   icon: typeof LayoutGrid;
   exact?: boolean;
   disabled?: boolean;
+  permission?: AdminPermission;
 }
 
 
 const SUPER_ADMIN_NAV_ITEMS: NavItem[] = [
-  { href: '/super-admin', label: 'Admin Merkezi', roles: ['super_admin'], icon: ShieldCheck, exact: true },
-  { href: '/super-admin/companies', label: 'Şirketler', roles: ['super_admin'], icon: Building2 },
-  { href: '/super-admin/users', label: 'Kullanıcılar', roles: ['super_admin'], icon: Users },
-  { href: '/super-admin/packages', label: 'Paketler', roles: ['super_admin'], icon: Package },
-  { href: '/super-admin/usage', label: 'Kullanım / AI Maliyeti', roles: ['super_admin'], icon: BarChart3 },
-  { href: '/super-admin/support', label: 'Destek / Hata', roles: ['super_admin'], icon: LifeBuoy }
+  { href: '/super-admin', label: 'Dashboard', roles: ['super_admin', 'admin_team'], icon: LayoutGrid, exact: true, permission: 'dashboard' },
+  { href: '/super-admin/companies', label: 'Şirketler', roles: ['super_admin', 'admin_team'], icon: Building2, permission: 'companies' },
+  { href: '/super-admin/users', label: 'Kullanıcılar', roles: ['super_admin', 'admin_team'], icon: Users, permission: 'users' },
+  { href: '/super-admin/team', label: 'Yönetici Ekibi', roles: ['super_admin', 'admin_team'], icon: UserCog, permission: 'team' },
+  { href: '/super-admin/tenders', label: 'İhaleler', roles: ['super_admin', 'admin_team'], icon: FolderArchive, permission: 'tenders' },
+  { href: '/super-admin/packages', label: 'Paketler', roles: ['super_admin', 'admin_team'], icon: Package, permission: 'packages' },
+  { href: '/super-admin/subscriptions', label: 'Abonelikler', roles: ['super_admin', 'admin_team'], icon: CreditCard, permission: 'subscriptions' },
+  { href: '/super-admin/usage', label: 'AI Kullanımı', roles: ['super_admin', 'admin_team'], icon: BarChart3, permission: 'usage' },
+  { href: '/super-admin/analytics', label: 'Analitik', roles: ['super_admin', 'admin_team'], icon: Radar, permission: 'analytics' },
+  { href: '/super-admin/activity-log', label: 'Activity Log', roles: ['super_admin', 'admin_team'], icon: Activity, permission: 'activity' },
+  { href: '/super-admin/support', label: 'Destek / Hata', roles: ['super_admin', 'admin_team'], icon: LifeBuoy, permission: 'support' },
+  { href: '/super-admin/settings', label: 'Ayarlar', roles: ['super_admin', 'admin_team'], icon: Settings, permission: 'settings' }
 ];
 
 const NAV_ITEMS: NavItem[] = [
@@ -37,13 +45,13 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Ayarlar', roles: ['owner', 'admin'], icon: Settings, disabled: true }
 ];
 
-export default function Sidebar({ role, displayName, email, isSuperAdmin = false }: { role: UserRole; displayName: string; email?: string; isSuperAdmin?: boolean }) {
+export default function Sidebar({ role, displayName, email, isSuperAdmin = false, adminRole }: { role: UserRole; displayName: string; email?: string; isSuperAdmin?: boolean; adminRole?: string | null }) {
   const pathname = usePathname();
   const router = useRouter();
   const { signOut } = useAuth();
 
   const visibleItems = isSuperAdmin
-    ? SUPER_ADMIN_NAV_ITEMS
+    ? (role === 'super_admin' ? SUPER_ADMIN_NAV_ITEMS : SUPER_ADMIN_NAV_ITEMS.filter((item) => !item.permission || hasAdminPermission(adminRole, item.permission)))
     : NAV_ITEMS.filter((item) => item.roles.includes(role));
 
   const handleSignOut = async () => {
@@ -53,6 +61,7 @@ export default function Sidebar({ role, displayName, email, isSuperAdmin = false
 
   const roleLabel: Record<string, string> = {
     super_admin: 'Super Admin',
+    admin_team: 'Yönetici Ekibi',
     owner: 'Şirket Sahibi',
     admin: 'Yönetici',
     member: 'Üye'

@@ -4,7 +4,7 @@
 // ID token, güvenli bir HttpOnly session cookie'sine çevrilir.
 // ============================================================
 import { NextRequest } from 'next/server';
-import { adminAuth } from '@/lib/firebase/admin';
+import { adminAuth, adminDb } from '@/lib/firebase/admin';
 import { SESSION_COOKIE_NAME, ensureSuperAdminProfile, getSessionContext } from '@/lib/auth/session';
 import { apiError, apiSuccess, withApiErrorHandling } from '@/lib/api/guard';
 
@@ -36,6 +36,20 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
     email: decoded.email ?? '',
     displayName: decoded.name ?? null
   });
+
+  const userRef = adminDb.collection('users').doc(decoded.uid);
+  const userSnap = await userRef.get();
+  const userProfile = userSnap.data() as any;
+  if (userProfile?.status === 'disabled') {
+    return apiError(403, 'user_inactive', 'Kullanıcı hesabınız pasif durumdadır.');
+  }
+  if (userProfile?.companyId && userProfile?.role !== 'super_admin') {
+    const companySnap = await adminDb.collection('companies').doc(userProfile.companyId).get();
+    if (!companySnap.exists || (companySnap.data() as any)?.status === 'disabled') {
+      return apiError(403, 'company_inactive', 'Şirket hesabınız kullanıma kapalıdır.');
+    }
+  }
+  await userRef.set({ lastLoginAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true });
 
   const sessionCookie = await adminAuth.createSessionCookie(idToken, {
     expiresIn: SESSION_EXPIRES_MS

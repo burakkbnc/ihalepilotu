@@ -84,6 +84,11 @@ export interface Tender {
   createdBy: string; // uid
   createdAt: string;
   updatedAt: string;
+
+  /** Süper admin çöp kutusu alanları — silinen kayıt kullanıcı uygulamasında görünmez. */
+  deletedAt?: string | null;
+  deletedBy?: string | null;
+  statusBeforeDelete?: TenderStatus | null;
 }
 
 /** Tender oluşturma isteği gövdesi */

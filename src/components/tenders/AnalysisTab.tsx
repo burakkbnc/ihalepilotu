@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Tabs, TabsList, TabsTrigger, TabsContent, ButtonLink } from '@/components/ui';
 import { RefreshCw, Download, Share2, BrainCircuit, FileCheck2, ListChecks, Clock3, Bot } from 'lucide-react';
 import AnalysisResultsView from './AnalysisResultsView';
@@ -29,6 +30,7 @@ export default function AnalysisTab({
   initialDocuments: TenderDocument[];
   editable: boolean;
 }) {
+  const router = useRouter();
   const [sections, setSections] = useState<TenderAnalysis[]>(initialSections);
   const [runs, setRuns] = useState<AnalysisRun[]>(initialRuns);
   const [items, setItems] = useState<TenderItem[]>(initialItems);
@@ -72,7 +74,13 @@ export default function AnalysisTab({
         headers: { 'Content-Type': 'application/json' }
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body?.error?.message || 'Analiz başlatılamadı.');
+      if (!res.ok) {
+        if (body?.error?.code === 'insufficient_credits') {
+          router.push('/paketler?reason=free-limit');
+          return;
+        }
+        throw new Error(body?.error?.message || 'Analiz başlatılamadı.');
+      }
 
       const run = body.data.run as AnalysisRun;
       await handleCompleted(

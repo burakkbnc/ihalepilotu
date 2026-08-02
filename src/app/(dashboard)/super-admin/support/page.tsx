@@ -1,5 +1,5 @@
 import { adminDb } from '@/lib/firebase/admin';
-import { requireSuperAdmin } from '@/lib/auth/adminGuard';
+import { requireAdminPermission } from '@/lib/auth/adminGuard';
 import { LifeBuoy } from 'lucide-react';
 
 function formatDate(value?: string) {
@@ -9,7 +9,7 @@ function formatDate(value?: string) {
 }
 
 export default async function Page() {
-  await requireSuperAdmin();
+  await requireAdminPermission('support');
   const [ticketsSnap, logsSnap] = await Promise.all([
     adminDb.collection('supportTickets').orderBy('createdAt','desc').limit(50).get().catch(() => null),
     adminDb.collection('errorLogs').orderBy('createdAt','desc').limit(50).get().catch(() => null)

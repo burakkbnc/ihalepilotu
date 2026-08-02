@@ -44,7 +44,9 @@ export const GET = withApiErrorHandling(async (req: NextRequest) => {
   }
 
   const snap = await query.get();
-  const tenders = snap.docs.map((d) => d.data() as Tender);
+  const tenders = snap.docs
+    .map((d) => d.data() as Tender & { deletedAt?: string | null })
+    .filter((tender) => !tender.deletedAt);
 
   return apiSuccess({ tenders });
 });
@@ -90,12 +92,13 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
   const tenderLimit = company?.plan?.tenderLimit as number | null | undefined;
 
   if (tenderLimit !== null && tenderLimit !== undefined) {
-    const tendersCountSnap = await companyRef.collection('tenders').count().get();
-    if (tendersCountSnap.data().count >= tenderLimit) {
+    const tendersSnap = await companyRef.collection('tenders').get();
+    const activeTenderCount = tendersSnap.docs.filter((doc) => !doc.data().deletedAt).length;
+    if (activeTenderCount >= tenderLimit) {
       throw new ApiError(
         403,
         'tender_limit_reached',
-        `Şirket ihale limitine (${tenderLimit}) ulaşıldı. Lütfen paketi yükseltin.`
+        `Ücretsiz ihale hakkınız kullanıldı. Devam etmek için bir paket seçin.`
       );
     }
   }

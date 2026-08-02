@@ -31,10 +31,17 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
     id: companyRef.id,
     name,
     ownerId: session.uid,
+    status: 'active',
     plan: {
-      name: 'trial',
-      tenderLimit: 5,
-      userLimit: 5
+      name: 'free',
+      tenderLimit: 1,
+      userLimit: 1,
+      analysisCredits: 1,
+      analysisCreditsRemaining: 1,
+      assistantQuestionLimit: 5,
+      trialStartedAt: null,
+      trialEndsAt: null,
+      billingStatus: 'active'
     },
     createdAt: now,
     updatedAt: now
